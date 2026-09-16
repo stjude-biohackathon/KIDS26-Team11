@@ -6,7 +6,7 @@ This repository is a starting point for a three-day team project. This repositor
 
 ## Project Profile
 
-- **Project name:** [Add a short, descriptive name]
+- **Project name:** FAIR Harmonization and Automated LabKey Integration of Legacy Sequencing Metadata
 - **Question, problem, or opportunity:** [What are you exploring?]
 - **Data, inputs, or evidence:** [What will you use, and where does it come from?]
 - **Expected output:** [What will you show, test, explain, or demonstrate?]
