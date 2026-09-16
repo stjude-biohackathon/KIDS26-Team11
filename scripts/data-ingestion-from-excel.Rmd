@@ -1,0 +1,188 @@
+---
+title: "Excel Metadata Ingestion and Merging"
+author: "Asha Jacob Jannu"
+date: "2026-09-16"
+output: html_document
+---
+
+# Purpose
+
+This notebook ingests metadata from multiple Excel workbooks and all tabs within each workbook, merges them into one dataframe, and exports the result as a CSV file.
+
+It:
+- Finds all `.xlsx` and `.xls` files in an input folder.
+- Reads every sheet from every workbook.
+- Reads all columns as text to avoid type conflicts across files.
+- Preserves free-text fields such as `Notes`.
+- Cleans column names.
+- Adds `source_file` and `source_sheet`.
+- Combines tables even when columns differ.
+- Keeps missing values as `NA` in the final CSV.
+
+This notebook performs data ingestion only. Schema normalization, value normalization, and validation should be handled separately.
+
+# Required packages
+
+Install these packages once if needed:
+
+```{r install-packages, eval=FALSE}
+install.packages(c("readxl", "dplyr", "purrr", "janitor", "readr"))
+```
+
+Load the packages:
+
+```{r setup, message=FALSE, warning=FALSE}
+library(readxl)
+library(dplyr)
+library(purrr)
+library(janitor)
+library(readr)
+```
+
+# User settings
+
+Set the folder containing the Excel files and the output CSV filename.
+
+```{r user-settings}
+input_dir <- "metadata/"
+output_file <- "combined_metadata.csv"
+```
+
+# Find Excel files
+
+```{r find-files}
+files <- list.files(
+  path = input_dir,
+  pattern = "\\.(xlsx|xls|txt)$",
+  full.names = TRUE,
+  ignore.case = TRUE
+)
+
+if (length(files) == 0) {
+  stop("No files were found in: ", input_dir)
+}
+
+cat("Excel files found:", length(files), "\n")
+basename(files)
+```
+
+# Parse and merge input files
+
+Here, each excel file is checked for sheet names. Every sheet is read separately and all columns are imported as text.
+
+Reading all columns as text prevents type conflicts when the same column contains dates, numbers, IDs, or text across different files.
+
+```{r parse-and-merge}
+# Parse and merge .xls/.xlsx and .txt files
+combined_data <- map_dfr(files, function(file) {
+
+  if (grepl("\\.xlsx?$", file, ignore.case = TRUE)) {
+
+    sheets <- excel_sheets(file)
+
+    map_dfr(sheets, function(sheet) {
+      df <- read_excel(path = file, sheet = sheet, col_types = "text") %>% clean_names()
+      
+      message(basename(file), " | ", sheet, " | Rows: ", nrow(df), " | Columns: ", ncol(df))
+      
+      df %>% mutate(source_file = basename(file), source_sheet = sheet)
+    })
+
+  } else if (grepl("\\.txt$", file, ignore.case = TRUE)) {
+
+    df <- read_tsv(file, col_types = cols(.default = col_character())) %>% clean_names()
+    
+    message(basename(file), " | Rows: ", nrow(df), " | Columns: ", ncol(df))
+
+    df %>% mutate(source_file = basename(file), source_sheet = NA_character_)
+  }
+})
+
+# Remove completely empty columns
+combined_data <- combined_data %>%
+  select(where(~ !all(is.na(.x) | trimws(.x) == ""))) %>% as.data.frame(combined_data)
+
+# Rename remaining unnamed columns
+unnamed_cols <- names(combined_data)[grepl("^x[0-9]+$", names(combined_data))]
+
+names(combined_data)[match(unnamed_cols, names(combined_data))] <- paste0("extra_unnamed_col", seq_along(unnamed_cols))
+
+```
+
+# Different columns across sheets
+
+The sheets do not need to contain identical columns. For example, one sheet/file may contain:
+
+```text
+sample_id | species | tissue | notes
+```
+
+and another sheet/file:
+
+```text
+sample_id | assay | platform
+```
+
+The combined dataframe will contain the union of all columns:
+
+```text
+sample_id | species | tissue | notes | assay | platform
+```
+Columns missing from a particular sheet/file will contain `NA`.
+
+# Free-text fields
+
+Text containing spaces and commas remains in a single field. For example:
+
+```text
+Sample received on dry ice and sample quality was acceptable
+```
+remains one value in the `notes` column.
+
+# Inspect the combined dataframe
+
+```{r inspect-data}
+dim(combined_data)
+head(combined_data)
+names(combined_data)
+```
+
+# Review source information
+
+`source_file` contains the original Excel filename and `source_sheet` contains the original sheet name.
+
+```{r inspect-source}
+combined_data %>%
+  count(source_file, source_sheet, name = "rows")
+```
+
+# Export the combined CSV
+
+Missing values are written explicitly as `NA`.
+
+```{r export-csv}
+write_csv(combined_data, output_file, na = "NA")
+
+cat("Combined CSV written to:", output_file, "\n")
+```
+
+# Ingestion summary
+
+```{r ingestion-summary}
+cat("Excel files processed:", length(files), "\n",
+  "Rows in combined dataset:", nrow(combined_data), "\n",
+  "Columns in combined dataset:", ncol(combined_data), "\n",
+  "Output file:", output_file, "\n")
+```
+
+
+# The script assumes:
+
+The parser assumes:
+- The first row of each sheet contains the column headers.
+- Each sheet contains one main table.
+- Different sheets may contain different columns.
+- Column equivalence is handled later during schema normalization.
+
+
+[^1]: Developed as part of the St. Jude BioHackathon 2026. (Team-11)
