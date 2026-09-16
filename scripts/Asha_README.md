@@ -1,4 +1,4 @@
-Metadata Harmonization
+# Metadata Ingestion
 This script combines metadata from multiple Excel files into one CSV file.
 It:
 - Reads all Excel files from the input folder
