@@ -1,0 +1,78 @@
+---
+title: "validate_metadata_quality"
+format: html
+editor: visual
+---
+
+### Packages
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyverse)
+```
+
+### Read in Files
+
+```{r}
+df <- read.csv("/home/nshanbha/KIDS26-Team11/scripts/data_ingestion/combined_metadata.csv")
+
+df <- df %>% mutate(SRM_concat = paste(srm_order_number,srm_sample_number, sep = "-")) %>% relocate(SRM_concat, .after = srm_sample_number)
+```
+
+### Basic Summary Stats
+
+```{r}
+#1 LAB ID
+df %>% distinct(lab_id_number, .keep_all = TRUE) #9451 unique
+df %>% count(lab_id_number) %>% filter(n > 1) 
+```
+
+### RNA Sequence Data Verification
+
+```{r}
+#4 Check if the file exists in the RNA sequencing file
+rna_sequence_data_df <- read.csv("/home/nshanbha/KIDS26-Team11/dataset/sequence_data_exist.txt", col.names = "file", header = FALSE)
+
+rna_sequence_data_df <- rna_sequence_data_df %>% mutate(SRM_sample = str_split_i(file, "/", i = 2)) %>% mutate(SRM_sample = str_split_i(SRM_sample, "-", 2)) %>% mutate(SRM_order = str_split_i(file, "/", i = 3)) %>% mutate(SRM_order = str_split_i(SRM_order, "_", i = 1)) %>% mutate(SRM_concat = paste(SRM_sample, SRM_order, sep = "-")) 
+
+#There are duplicate SRM ids in the rna_sequence_data (they differ by that number in the middle)
+rna_sequence_data_df %>% group_by(SRM_concat) %>% filter(n() > 1)
+
+#Take the distinct RNA sequence data SRM ids 
+rna_sequence_data_ids <- rna_sequence_data_df %>% distinct(SRM_concat)
+
+#Overlap of RNA SRM ids found in combined df
+overlap <- df %>% mutate(is_in_seq_data = if_else(SRM_concat %in% rna_sequence_data_ids, 1, 0)) %>% filter(is_in_seq_data == 1) %>% distinct(SRM_concat)
+
+#Set Difference of RNA SRM ids and Overlap
+rna_orphans <- setdiff(rna_sequence_data_ids,overlap) %>% pull()
+rna_sequence_data_df <- rna_sequence_data_df %>% filter(SRM_concat %in% rna_orphans) %>% distinct(SRM_order)
+```
+
+### Missing Information
+
+```{r}
+human_verification <- df %>% filter(is.na(lab_id_number) | is.na(sample_name) | is.na(srm_order_number) | is.na(srm_sample_number))
+```
+
+### Human Verification
+
+```{r}
+#1 Duplicate SRM Sample # but DYE different (must flag this, it's an error)
+duplicate_SRM_samples <- df %>% group_by(srm_sample_number) %>% filter(n() > 1)
+
+#2 Duplicate DYE but the SRM different (resequenced) - the SRM order and SRM sample act as a unique identifier. If the SRM order and SRM sample are the same, then flag it. In this case, eliminate embryoid bodies
+duplicate_DYE <- df %>% group_by(lab_id_number) %>% filter(n() > 1) %>% group_by(lab_id_number, SRM_concat) %>% filter(n() > 1)
+
+#3 Missing SRM Order # - 
+missing_SRM_order <- df %>% filter(is.na(srm_order_number))
+
+#4 Lab ID fall out of DYE, DY, or SJNorm
+weird_lab_id <- df %>% filter(!str_detect(pattern = "DYE|DY|SJMMNOR|MDSEQ", lab_id_number))
+
+write.csv(duplicate_SRM_samples, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_SRM_samples.csv")
+write.csv(duplicate_DYE, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_DYE.csv")
+write.csv(missing_SRM_order, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_SRM_order.csv")
+write.csv(weird_lab_id, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/weird_lab_id.csv")
+```
