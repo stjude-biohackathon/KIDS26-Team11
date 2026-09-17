@@ -46,6 +46,8 @@ Set the folder containing the Excel files and the output CSV filename.
 ```{r user-settings}
 input_dir <- "metadata/"
 output_file <- "combined_metadata.csv"
+duplicated_rows_file <- "duplicated_info_rows.csv"
+incomplete_rows_file <- "incomplete_info_rows.csv"
 ```
 
 # Find Excel files
@@ -68,44 +70,92 @@ basename(files)
 
 # Parse and merge input files
 
-Here, each excel file is checked for sheet names. Every sheet is read separately and all columns are imported as text.
-
-Reading all columns as text prevents type conflicts when the same column contains dates, numbers, IDs, or text across different files.
+Here, each excel file is checked for sheet names. Every sheet is read separately and all columns are imported as text. Reading all columns as text prevents type conflicts when the same column contains dates, numbers, IDs, or text across different files.
 
 ```{r parse-and-merge}
 # Parse and merge .xls/.xlsx and .txt files
+
 combined_data <- map_dfr(files, function(file) {
 
   if (grepl("\\.xlsx?$", file, ignore.case = TRUE)) {
-
     sheets <- excel_sheets(file)
-
+    
     map_dfr(sheets, function(sheet) {
-      df <- read_excel(path = file, sheet = sheet, col_types = "text") %>% clean_names()
-      
-      message(basename(file), " | ", sheet, " | Rows: ", nrow(df), " | Columns: ", ncol(df))
-      
+      df <- read_excel(path = file, sheet = sheet, col_types = "text") %>%
+        clean_names() %>% filter(if_any(everything(), ~ !is.na(.x) & trimws(.x) != ""))
+
+      original_rows <- nrow(df)
+      unique_rows <- nrow(distinct(df))
+
+      message(basename(file), " ; ", sheet, " ; Original rows: ", original_rows,
+        " ; Unique rows: ", unique_rows, " ; Columns: ", ncol(df))
+
       df %>% mutate(source_file = basename(file), source_sheet = sheet)
     })
 
   } else if (grepl("\\.txt$", file, ignore.case = TRUE)) {
 
-    df <- read_tsv(file, col_types = cols(.default = col_character())) %>% clean_names()
-    
-    message(basename(file), " | Rows: ", nrow(df), " | Columns: ", ncol(df))
+    df <- read_tsv(file, col_types = cols(.default = col_character())) %>%
+      clean_names() %>% filter(if_any(everything(), ~ !is.na(.x) & trimws(.x) != ""))
+
+    original_rows <- nrow(df)
+    unique_rows <- nrow(distinct(df))
+
+    message(basename(file), " ; Original rows: ", original_rows, 
+            " ; Unique rows: ", unique_rows, " ; Columns: ", ncol(df))
 
     df %>% mutate(source_file = basename(file), source_sheet = NA_character_)
   }
 })
 
+
 # Remove completely empty columns
 combined_data <- combined_data %>%
-  select(where(~ !all(is.na(.x) | trimws(.x) == ""))) %>% as.data.frame(combined_data)
+  select(where(~ !all(is.na(.x) | trimws(.x) == ""))) %>%
+  as.data.frame()
 
 # Rename remaining unnamed columns
 unnamed_cols <- names(combined_data)[grepl("^x[0-9]+$", names(combined_data))]
 
-names(combined_data)[match(unnamed_cols, names(combined_data))] <- paste0("extra_unnamed_col", seq_along(unnamed_cols))
+names(combined_data)[match(unnamed_cols, names(combined_data))] <-
+  paste0("extra_unnamed_col", seq_along(unnamed_cols))
+
+
+# Remove rows where all columns except source_file and source_sheet are NAs
+combined_data <- combined_data %>%
+  filter(!if_all(-c(source_file, source_sheet), is.na)) %>% as.data.frame()
+
+# Define metadata columns for filtering/duplicate checks
+# source_file and source_sheet are excluded
+metadata_cols <- setdiff(names(combined_data), c("source_file", "source_sheet"))
+
+# Count how many metadata columns contain information in each row
+combined_data <- combined_data %>%
+  mutate(populated_metadata_cols = rowSums(across(all_of(metadata_cols),
+        ~ !is.na(.x) & trimws(.x) != "")))
+
+# Capture all duplicated rows before changing the data
+# Duplicates are determined using metadata columns only
+duplicated_info_rows <- combined_data %>% group_by(across(all_of(metadata_cols))) %>%
+  filter(n() > 1) %>% ungroup() %>%
+  select(-populated_metadata_cols) %>% as.data.frame()
+
+# Capture rows where only two or less metadata column contains information
+# source_file and source_sheet are not counted
+incomplete_info_rows <- combined_data %>% filter(populated_metadata_cols == 1) %>%
+  select(-populated_metadata_cols) %>% as.data.frame()
+
+# Remove incomplete rows from the final combined dataset
+combined_data <- combined_data %>%
+  filter(populated_metadata_cols > 1) %>% select(-populated_metadata_cols)
+
+# Collapse remaining duplicated rows
+# Keep the metadata once and combine the source information
+combined_data <- combined_data %>%
+  group_by(across(all_of(metadata_cols))) %>%
+  summarise(source_file = paste(unique(source_file), collapse = ", "),
+            source_sheet = paste(source_sheet, collapse = ", "), .groups = "drop") %>% as.data.frame()
+
 
 ```
 
@@ -161,15 +211,20 @@ combined_data %>%
 Missing values are written explicitly as `NA`.
 
 ```{r export-csv}
-write_csv(combined_data, output_file, na = "NA")
+write_csv(duplicated_info_rows, duplicated_rows_file, na = "NA")
+cat("Duplicated rows are written to:", duplicated_rows_file, "\n")
 
+write_csv(incomplete_info_rows, incomplete_rows_file, na = "NA")
+cat("Incomplete rows are written to:", incomplete_rows_file, "\n")
+
+write_csv(combined_data, output_file, na = "NA")
 cat("Combined CSV written to:", output_file, "\n")
 ```
 
 # Ingestion summary
 
 ```{r ingestion-summary}
-cat("Excel files processed:", length(files), "\n",
+cat("Number of files processed:", length(files), "\n",
   "Rows in combined dataset:", nrow(combined_data), "\n",
   "Columns in combined dataset:", ncol(combined_data), "\n",
   "Output file:", output_file, "\n")
