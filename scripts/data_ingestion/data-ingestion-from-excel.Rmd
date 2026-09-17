@@ -53,18 +53,13 @@ incomplete_rows_file <- "incomplete_info_rows.csv"
 # Find Excel files
 
 ```{r find-files}
-files <- list.files(
-  path = input_dir,
-  pattern = "\\.(xlsx|xls|txt)$",
-  full.names = TRUE,
-  ignore.case = TRUE
-)
+files <- list.files(path = input_dir, pattern = "\\.(xlsx|xls|txt)$", full.names = TRUE, ignore.case = TRUE)
 
 if (length(files) == 0) {
   stop("No files were found in: ", input_dir)
 }
 
-cat("Excel files found:", length(files), "\n")
+cat("Raw input files found:", length(files), "\n")
 basename(files)
 ```
 
@@ -75,6 +70,21 @@ Here, each excel file is checked for sheet names. Every sheet is read separately
 ```{r parse-and-merge}
 # Parse and merge .xls/.xlsx and .txt files
 
+# Firstly, convert Excel serial numbers to dates only in date columns
+convert_excel_date <- function(x) {
+  is_serial <- !is.na(x) & grepl("^\\d{5}(\\.0+)?$", x)
+
+  if (any(is_serial)) {
+    dates <- as.Date(as.numeric(x[is_serial]), origin = "1899-12-30")
+    
+    x[is_serial] <- paste0(as.integer(format(dates, "%m")), "/", as.integer(format(dates, "%d")), "/", format(dates, "%y"))
+  }
+
+  x
+}
+
+
+# Now parse and merge
 combined_data <- map_dfr(files, function(file) {
 
   if (grepl("\\.xlsx?$", file, ignore.case = TRUE)) {
@@ -82,7 +92,8 @@ combined_data <- map_dfr(files, function(file) {
     
     map_dfr(sheets, function(sheet) {
       df <- read_excel(path = file, sheet = sheet, col_types = "text") %>%
-        clean_names() %>% filter(if_any(everything(), ~ !is.na(.x) & trimws(.x) != ""))
+        clean_names() %>% mutate(across(contains("date"), convert_excel_date)) %>%
+        filter(if_any(everything(), ~ !is.na(.x) & trimws(.x) != ""))
 
       original_rows <- nrow(df)
       unique_rows <- nrow(distinct(df))
@@ -195,6 +206,7 @@ remains one value in the `notes` column.
 dim(combined_data)
 head(combined_data)
 names(combined_data)
+
 ```
 
 # Review source information
