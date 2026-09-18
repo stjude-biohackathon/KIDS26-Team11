@@ -1,0 +1,165 @@
+---
+title: "HARTWELL Data Validation"
+author: "KIDS26-Team11"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Purpose
+
+This notebook validates a TSV or CSV file against `validation_rules_schema_HARTWELL.json`, a plain `type`/`required`/`allowed` schema, and writes two outputs:
+
+- rows that pass every check, ready to upload to LabKey
+- rows that fail, with the specific field and reason for each failure
+
+It performs validation only. Merging, standardization, and LabKey upload are handled elsewhere.
+
+# Required packages
+
+```{r install-packages, eval=FALSE}
+install.packages(c("tidyverse", "jsonlite"))
+```
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(jsonlite)
+library(tools)
+```
+
+# User settings
+
+```{r user-settings}
+input_path  <- "../../analyses/HARTWELL_database_Master_MERGED.tsv"
+schema_path <- "validation_rules_schema_HARTWELL.json"
+out_prefix  <- "HARTWELL_database_Master_MERGED"
+```
+
+# Read the input file
+
+Reads as CSV or TSV based on the file extension. All columns are read as text so blanks and formatting are preserved exactly as validation sees them.
+
+```{r read-input}
+read_table <- if (file_ext(input_path) == "csv") read_csv else read_tsv
+data <- read_table(input_path, col_types = cols(.default = "c")) %>%
+  mutate(row_id = row_number())
+
+dim(data)
+names(data)
+```
+
+# Read the schema
+
+```{r read-schema}
+rules <- fromJSON(schema_path, simplifyVector = FALSE)$hartwell_sample_rules
+
+length(rules)
+names(rules)
+```
+
+# Match schema fields to columns
+
+A few schema field names don't match the raw HARTWELL column names (e.g. schema field `Lab_ID` vs. actual column `Lab ID #`). Those aliases are listed here rather than in the schema itself, so the schema stays plain `type`/`required`/`allowed`.
+
+```{r field-aliases}
+raw_column_aliases <- c(
+  Lab_ID = "Lab ID #",
+  Sample_Name = "Sample Name",
+  SRM_Order_ID = "SRM Order #",
+  SRM_Sample_ID = "SRM Sample #",
+  Order_by = "Ordered by",
+  Parental_Model_ID = "parental_model_id"
+)
+
+fields <- map(names(rules), function(field_name) {
+  r <- rules[[field_name]]
+  column <- case_when(
+    field_name %in% names(data) ~ field_name,
+    field_name %in% names(raw_column_aliases) ~ unname(raw_column_aliases[field_name]),
+    TRUE ~ NA_character_
+  )
+  list(field = field_name, column = column, required = isTRUE(r$required),
+       type = r$type, allowed = unlist(r$allowed))
+})
+```
+
+# Check each field
+
+For every schema field, checks:
+
+- **required**: value must not be blank
+- **allowed**: value, if present, must be in the schema's allowed list
+- **boolean**: value, if present, must parse as `TRUE`/`FALSE`
+
+Produces one row per (row, field, reason) failure.
+
+```{r validate}
+errors <- map_dfr(fields, function(f) {
+  if (is.na(f$column)) {
+    if (f$required) return(tibble(row_id = data$row_id, field = f$field, reason = "required column missing from input"))
+    return(tibble())
+  }
+
+  values <- data[[f$column]]
+  blank  <- is.na(values) | str_trim(values) == ""
+
+  bind_rows(
+    if (f$required) tibble(row_id = data$row_id[blank], field = f$field, reason = "required but blank"),
+    if (!is.null(f$allowed)) {
+      bad <- !blank & !(values %in% f$allowed)
+      tibble(row_id = data$row_id[bad], field = f$field, reason = str_c("value '", values[bad], "' not allowed"))
+    },
+    if (identical(f$type, "boolean")) {
+      bad <- !blank & !(str_to_lower(str_trim(values)) %in% c("true", "false", "t", "f", "1", "0"))
+      tibble(row_id = data$row_id[bad], field = f$field, reason = str_c("'", values[bad], "' is not a valid boolean"))
+    }
+  )
+})
+```
+
+# Split into valid and failing rows
+
+```{r split}
+row_errors <- errors %>%
+  group_by(row_id) %>%
+  summarise(validation_errors = str_c(field, ": ", reason, collapse = "; "), .groups = "drop")
+
+data <- left_join(data, row_errors, by = "row_id")
+valid_rows   <- data %>% filter(is.na(validation_errors)) %>% select(-row_id, -validation_errors)
+invalid_rows <- data %>% filter(!is.na(validation_errors)) %>% select(-row_id)
+```
+
+# Most common validation failures
+
+```{r failure-summary}
+if (nrow(invalid_rows) > 0) {
+  reasons <- str_split(invalid_rows$validation_errors, "; ") %>% unlist()
+  field_only <- str_extract(reasons, "^[^:]+")
+  sort(table(field_only), decreasing = TRUE)
+}
+```
+
+# Export the outputs
+
+```{r export}
+write_tsv(valid_rows, str_c(out_prefix, "_valid.tsv"), na = "")
+write_tsv(invalid_rows, str_c(out_prefix, "_validation_errors.tsv"), na = "")
+
+cat("Valid output:", str_c(out_prefix, "_valid.tsv"), "\n")
+cat("Errors output:", str_c(out_prefix, "_validation_errors.tsv"), "\n")
+```
+
+# Validation summary
+
+```{r summary}
+cat("Total rows:", nrow(data), "\n",
+    "Valid rows:", nrow(valid_rows), "\n",
+    "Failing rows:", nrow(invalid_rows), "\n")
+```
+
+# The notebook assumes:
+
+- `input_path` is already merged/standardized data, one record per row.
+- Column names in `input_path` match the schema's field names exactly, or are covered by `raw_column_aliases`.
+- The schema file uses the same `type`/`required`/`allowed`/`boolean` structure as `validation_rules_schema_HARTWELL.json`.
+
+[^1]: Developed as part of the St. Jude BioHackathon 2026. (Team-11)

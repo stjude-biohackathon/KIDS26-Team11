@@ -1,0 +1,140 @@
+{
+  "hartwell_sample_rules": {
+    "Lab_ID": {
+      "type": "string",
+      "required": true
+    },
+    "Sample_Name": {
+      "type": "string",
+      "required": true
+    },
+    "SRM_Order_ID": {
+      "type": "string",
+      "required": true
+    },
+    "SRM_Sample_ID": {
+      "type": "string",
+      "required": true
+    },
+    "organism": {
+      "type": "string",
+      "required": true,
+      "allowed": [
+        "Homo sapiens",
+        "Mus musculus"
+      ]
+    },
+    "Order_by": {
+      "type": "string",
+      "required": true
+    },
+    "composition": {
+      "type": "string",
+      "required": false,
+      "allowed": [
+        "Cell Line",
+        "PDX",
+        "Solid Tissue"
+      ]
+    },
+    "sample_type": {
+      "type": "string",
+      "required": true,
+      "allowed": [
+        "Tumor",
+        "Normal"
+      ]
+    },
+    "tumor_diagnosis": {
+      "type": "string",
+      "required": false,
+      "allowed": [
+        "EWS",
+        "MEL",
+        "NBL",
+        "OST",
+        "RB",
+        "RMS",
+        "WT"
+      ]
+    },
+    "experimental_strategy": {
+      "type": "string",
+      "required": true,
+      "allowed": [
+        "10x Flex GEX",
+        "Amplicon",
+        "ATAC-Seq",
+        "ChIP-Seq",
+        "CUT&Tag",
+        "Genotyping (MiSeq platform)",
+        "Methylation",
+        "Methylation Microarray",
+        "miRNA-Seq",
+        "Powerplex/STR",
+        "RNA-Seq",
+        "Sanger",
+        "scATAC-Seq",
+        "scRNA-Seq",
+        "snRNA-Seq",
+        "Tagged Amplicon",
+        "Targeted Sequencing",
+        "WGS",
+        "WXS"
+      ]
+    },
+    "is_paired": {
+      "type": "boolean",
+      "required": false
+    },
+    "is_topoff": {
+      "type": "boolean",
+      "required": true
+    },
+    "library_strand": {
+      "type": "string",
+      "required": false,
+      "allowed": [
+        "Stranded",
+        "Unknown",
+        "Unstranded"
+      ]
+    },
+    "library_prep": {
+      "type": "string",
+      "required": false,
+      "allowed": [
+        "polyA",
+        "totalRNAseq"
+      ]
+    },
+    "cell_line_passage": {
+      "type": "string",
+      "required": false
+    },
+    "FFPE": {
+      "type": "string",
+      "required": false
+    },
+    "Parental_Model_ID": {
+      "type": "string",
+      "required": false
+    },
+    "timepoint": {
+      "type": "string",
+      "required": false
+    },
+    "treatment": {
+      "type": "string",
+      "required": false
+    },
+    "dose": {
+      "type": "string",
+      "required": false
+    },
+    "bio_replicate": {
+      "type": "string",
+      "required": false
+    }
+  }
+}
