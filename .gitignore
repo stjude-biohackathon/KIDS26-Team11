@@ -59,6 +59,10 @@ MANIFEST
 *.manifest
 *.spec
 
+
+
+# Generated metadata harmonization outputs
+output/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
