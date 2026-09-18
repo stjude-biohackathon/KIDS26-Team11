@@ -197,6 +197,11 @@ The project will use approved, de-identified legacy sequencing metadata provided
 
 These datasets were selected because they represent real-world metadata challenges, including:
 
+
+## Example R harmonization workflow
+
+The repository includes a documented [HARTWELL metadata-standardization script](scripts/HARTWELL_standardization_2026-09-18_v14.R) for the example workbook [dataset/HARTWELL_database_Master_2025.xlsx](dataset/HARTWELL_database_Master_2025.xlsx). See [the usage guide](docs/hartwell-standardization.md) for dependencies, execution, safeguards, and limitations.
+
 * Inconsistent formatting
 * Variable naming conventions
 * Missing values
