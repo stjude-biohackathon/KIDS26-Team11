@@ -10,6 +10,7 @@ editor: visual
 library(readxl)
 library(dplyr)
 library(tidyverse)
+library(janitor)
 ```
 
 ### Read in Files
@@ -23,9 +24,23 @@ df <- df %>% mutate(SRM_concat = paste(srm_order_number,srm_sample_number, sep =
 ### Basic Summary Stats
 
 ```{r}
-#1 LAB ID
-df %>% distinct(lab_id_number, .keep_all = TRUE) #9451 unique
-df %>% count(lab_id_number) %>% filter(n > 1) 
+summary_stats <- function(column, df) {
+  unique <- df %>% distinct(.data[[column]]) %>% nrow()
+  dupes <- df %>% filter(!is.na(.data[[column]])) %>% count(.data[[column]]) %>% filter(n > 1) %>% summarize(dupes = sum(n - 1))  %>% pull()
+  missing <- df %>% filter(is.na(.data[[column]])) %>% nrow() 
+  c(column = column, unique = unique, dupes = dupes, missing = missing)
+}
+
+column_names <- c("lab_id_number", "sample_name", "srm_order_number", "srm_sample_number")
+
+summary_df <- map_dfr(column_names, summary_stats, df = df) %>% mutate(across(-column, as.numeric))
+
+summary_df %>% pivot_longer(cols = -column, names_to = "category", values_to = "value") %>% ggplot(aes(x = column, y = value, fill = category)) + geom_col(position = "dodge") + xlab("Category") + ylab("Number of Entries") + ggtitle("Distribution of Data") + geom_text(
+    aes(label = value),
+    position = position_dodge(width = 0.9),
+    vjust = -0.3
+  ) +  theme_classic()
+
 ```
 
 ### RNA Sequence Data Verification
@@ -36,8 +51,8 @@ rna_sequence_data_df <- read.csv("/home/nshanbha/KIDS26-Team11/dataset/sequence_
 
 rna_sequence_data_df <- rna_sequence_data_df %>% mutate(SRM_sample = str_split_i(file, "/", i = 2)) %>% mutate(SRM_sample = str_split_i(SRM_sample, "-", 2)) %>% mutate(SRM_order = str_split_i(file, "/", i = 3)) %>% mutate(SRM_order = str_split_i(SRM_order, "_", i = 1)) %>% mutate(SRM_concat = paste(SRM_sample, SRM_order, sep = "-")) 
 
-#There are duplicate SRM ids in the rna_sequence_data (they differ by that number in the middle)
-rna_sequence_data_df %>% group_by(SRM_concat) %>% filter(n() > 1)
+#There are 238 duplicate SRM ids in the rna_sequence_data (they differ by that number in the middle)
+rna_sequence_data_df %>% filter(!is.na(SRM_concat)) %>% count(SRM_concat) %>% filter(n > 1) %>% summarize(dupes = sum(n - 1))  
 
 #Take the distinct RNA sequence data SRM ids 
 rna_sequence_data_ids <- rna_sequence_data_df %>% distinct(SRM_concat)
@@ -46,20 +61,23 @@ rna_sequence_data_ids <- rna_sequence_data_df %>% distinct(SRM_concat)
 overlap <- df %>% mutate(is_in_seq_data = if_else(SRM_concat %in% rna_sequence_data_ids, 1, 0)) %>% filter(is_in_seq_data == 1) %>% distinct(SRM_concat)
 
 #Set Difference of RNA SRM ids and Overlap
-rna_orphans <- setdiff(rna_sequence_data_ids,overlap) %>% pull()
+rna_orphans <- setdiff(rna_sequence_data_ids,overlap) %>% pull() #rna ids that are not found in the df 
 rna_sequence_data_df <- rna_sequence_data_df %>% filter(SRM_concat %in% rna_orphans) %>% distinct(SRM_order)
+
 ```
 
 ### Missing Information
 
 ```{r}
-human_verification <- df %>% filter(is.na(lab_id_number) | is.na(sample_name) | is.na(srm_order_number) | is.na(srm_sample_number))
+missing_multiple_fields <- df %>% filter(is.na(lab_id_number) | is.na(sample_name) | is.na(srm_order_number) | is.na(srm_sample_number))
+
+write.csv(missing_multiple_fields, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/weird_lab_id.csv")
 ```
 
 ### Human Verification
 
 ```{r}
-#1 Duplicate SRM Sample # but DYE different (must flag this, it's an error)
+#1 Duplicate SRM Sample # but DYE different (must flag this, it's an error) - if it's multiplex or 10x barcode, then it is okay
 duplicate_SRM_samples <- df %>% group_by(srm_sample_number) %>% filter(n() > 1)
 
 #2 Duplicate DYE but the SRM different (resequenced) - the SRM order and SRM sample act as a unique identifier. If the SRM order and SRM sample are the same, then flag it. In this case, eliminate embryoid bodies
@@ -68,11 +86,23 @@ duplicate_DYE <- df %>% group_by(lab_id_number) %>% filter(n() > 1) %>% group_by
 #3 Missing SRM Order # - 
 missing_SRM_order <- df %>% filter(is.na(srm_order_number))
 
+#4 Missing SRM Sample # - 
+missing_SRM_sample <- df %>% filter(is.na(srm_sample_number))
+
+#5 Missing SRM Sample Name -
+missing_sample_names <- df %>% filter(is.na(sample_name))
+
 #4 Lab ID fall out of DYE, DY, or SJNorm
 weird_lab_id <- df %>% filter(!str_detect(pattern = "DYE|DY|SJMMNOR|MDSEQ", lab_id_number))
 
 write.csv(duplicate_SRM_samples, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_SRM_samples.csv")
 write.csv(duplicate_DYE, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_DYE.csv")
-write.csv(missing_SRM_order, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/duplicate_SRM_order.csv")
+write.csv(missing_SRM_order, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/missing_SRM_order.csv")
+write.csv(missing_SRM_sample, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/missing_SRM_samples.csv")
+write.csv(missing_sample_names, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/missing_sample_names.csv")
 write.csv(weird_lab_id, "/home/nshanbha/KIDS26-Team11/scripts/human_reviewers/weird_lab_id.csv")
+```
+
+```{r}
+rbind(duplicate_SRM_samples, duplicate_DYE, missing_SRM_order, missing_SRM_sample, weird_lab_id)
 ```
